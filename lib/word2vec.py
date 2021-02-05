@@ -3,6 +3,7 @@ Word2Vec class
     - 학습
     - 평가
 """
+import os.path
 import numpy as np
 import torch
 import torch.nn as nn
@@ -38,7 +39,7 @@ class Word2Vec:
 
     def save(self, fname):
         """ save model """
-        torch.save(self.w2v.state_dict(), '../results/model/' + fname)
+        torch.save(self.w2v.state_dict(), os.path.dirname(__file__) + '/../results/model/' + fname)
 
     def load(self, path: str):
         """ load pytorch model """
@@ -90,7 +91,7 @@ class CbowModel(Word2Vec):
     def dataset_form(self, corpus, word2idx):
         rst = []
         for sent in corpus:
-            sent = [word2idx[x] for x in sent if word2idx[x]]
+            sent = [word2idx[x] for x in sent if x in word2idx]
             for i in range(1, len(sent) - 1):
                 wrd = sent[i]
                 trg_f = sent[i - 1]
@@ -116,9 +117,8 @@ class CbowModel(Word2Vec):
         for epoch in tqdm(range(self.mconf.epoch), desc='epoch'):
             total_loss = 0
             total_acc = 0
-
             self.w2v.train()
-            for i, batch in tqdm(enumerate(self._dataload), desc="step", total=len(self._dataload)):
+            for i, batch in enumerate(self._dataload):
                 word, target = batch
                 self.optim.zero_grad()
                 pred = self.w2v(word)
@@ -128,10 +128,10 @@ class CbowModel(Word2Vec):
 
                 total_acc += accuracy(pred, target)
                 total_loss -= b_loss.item()
-
-            if epoch % 1000 == 0:
-                print()
-                print(total_loss, total_acc / self.mconf.epoch)
+            if epoch % 10 == 0:
+                self.save('trained.pth')
+            print(f'\tEpoch {epoch+1}\tTrain Loss: {total_loss / len(word):.3f}'
+                  f' | Acc: {total_acc / len(word):.3f}')
 
 
 class SkipGramModel(Word2Vec):
@@ -163,18 +163,18 @@ class SkipGramModel(Word2Vec):
 
             self.w2v.train()
             for i, batch in tqdm(enumerate(self._dataload), desc="step", total=len(self._dataload)):
-                i, o, neg = batch
+                inp, out, neg = batch
                 self.optim.zero_grad()
-                loss = self.w2v(i, o, neg)
+                loss = self.w2v(inp, out, neg)
 
                 loss.backward()
                 self.optim.step()
-                total_acc += accuracy(self.w2v.pred, o)
+                total_acc += accuracy(self.w2v.pred, out)
                 total_loss -= loss.item()
-
-            if epoch % 1000 == 0:
-                print()
-                print(total_loss, total_acc / self.mconf.epoch)
+            if epoch % 10 == 0:
+                self.save('trained.pth')
+            print(f'\tEpoch {epoch+1}\tTrain Loss: {total_loss / len(inp):.3f}'
+                  f' | Acc: {total_acc / len(inp):.3f}')
 
 
 def get_sub_sample(corpus, word2idx):

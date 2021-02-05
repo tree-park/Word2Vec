@@ -1,5 +1,5 @@
 {
   "min_cnt": 5,
-  "data_path": "data/0.csv",
+  "data_path": "data/en.csv",
   "cont_size": 1
 }

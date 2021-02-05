@@ -7,7 +7,12 @@
 import re
 import torch
 from torch.utils.data import Dataset
+import nltk
+from nltk.stem import WordNetLemmatizer
+
 from .data_handle import load_data
+
+nltk.download('wordnet')
 
 
 class TrainSet(Dataset):
@@ -38,14 +43,16 @@ class Vocab:
         self.word2idx = self.WORD2IDX
         self.idx2word = {}
         self.freq = {}
+        self.lemmatizer = WordNetLemmatizer()
 
     def load(self, corpus: list):
         vocabs = {}
         for sent in corpus:
             for word in sent:
-                if word not in vocabs.keys():
-                    vocabs[word] = 0
-                vocabs[word] += 1
+                lem_word = self.lemmatizer.lemmatize(word.lower())
+                if lem_word not in vocabs.keys():
+                    vocabs[lem_word] = 0
+                vocabs[lem_word] += 1
 
         vocabs = vocabs.keys()
         self.freq = vocabs
@@ -69,6 +76,7 @@ class Vocab:
         return len(self.word2idx)
 
     def __getitem__(self, item):
+        word = self.lemmatizer.lemmatize(item.lower())
         try:
             return self.word2idx[item]
         except KeyError:
@@ -77,10 +85,11 @@ class Vocab:
 
 def _preprocessor(corpus: list):
     result = []
+    lemmatizer = WordNetLemmatizer()
     for line in corpus:
         sents = _to_sentence(line)
         for s in sents:
-            words = _to_word(s)
+            words = _to_word(s, lemmatizer)
             result.append(words)
     return result
 
@@ -94,11 +103,15 @@ def _to_sentence(a_line: str) -> list:
     return rst
 
 
-def _to_word(a_sent: str) -> list:
+def _to_word(a_sent: str, lemmatizer: callable(str)) -> list:
     rst = []
     for word in a_sent.split(' '):
         if word.strip() in ',./?!':
             continue
-        rst.append(word.lower())
+        word = word.lower()
+        for rm in ['!', '?', '.', '\'', '\"']:
+            word.replace(rm, '')
+        word = lemmatizer.lemmatize(word)
+        rst.append(word)
         # 불용어 처리 등등...
     return rst
