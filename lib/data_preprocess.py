@@ -29,8 +29,9 @@ class TrainSet(Dataset):
 
     def __getitem__(self, idx: int):
         """ return input word and target word """
-        word, content = self._data[idx]
-        return torch.tensor([word[0], word[1]]), torch.tensor(content)
+        # word, content = self._data[idx]
+        # return torch.tensor([word[0], word[1]]), torch.tensor(content)
+        return [i for i in map(lambda x: torch.tensor(x), [x for x in self._data[idx]])]
 
 
 class Vocab:
@@ -49,15 +50,12 @@ class Vocab:
         vocabs = {}
         for sent in corpus:
             for word in sent:
-                lem_word = self.lemmatizer.lemmatize(word.lower())
-                if lem_word not in vocabs.keys():
-                    vocabs[lem_word] = 0
-                vocabs[lem_word] += 1
-
-        vocabs = vocabs.keys()
-        self.freq = vocabs
-        self.word2idx = {w: idx for idx, w in enumerate(vocabs)}
-        return self.word2idx
+                if word not in vocabs.keys():
+                    vocabs[word] = 0
+                vocabs[word] += 1
+        self.word2idx.update({w: idx for idx, w in enumerate(vocabs.keys(), start=len(self.word2idx))})
+        self.freq = {self.word2idx[k]: v for k, v in vocabs.items()}
+        return self
 
     def _vocabs_filter(self, v, cnt):
         if cnt < self.min_cnt:
@@ -78,7 +76,7 @@ class Vocab:
     def __getitem__(self, item):
         word = self.lemmatizer.lemmatize(item.lower())
         try:
-            return self.word2idx[item]
+            return self.word2idx[word]
         except KeyError:
             return self.word2idx[self.UNKNOWN]
 
@@ -109,9 +107,10 @@ def _to_word(a_sent: str, lemmatizer: callable(str)) -> list:
         if word.strip() in ',./?!':
             continue
         word = word.lower()
-        for rm in ['!', '?', '.', '\'', '\"']:
-            word.replace(rm, '')
+        for rm in ['!', '?', '.', '\'', '\"', '*']:
+            word = word.replace(rm, '')
+        if word in ['a', 'an', 'i', 'she', 'he', 'the', 'they', 'of', 'so', 'to']:
+            continue
         word = lemmatizer.lemmatize(word)
         rst.append(word)
-        # 불용어 처리 등등...
     return rst

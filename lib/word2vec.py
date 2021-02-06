@@ -30,6 +30,7 @@ class Word2Vec:
         self.loss = None
         self.optim = None
         self.lrscheder = None
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def dataset_form(self, corpus, word2idx):
         raise
@@ -39,18 +40,24 @@ class Word2Vec:
 
     def save(self, fname):
         """ save model """
-        torch.save(self.w2v.state_dict(), os.path.dirname(__file__) + '/../results/model/' + fname)
+        torch.save({
+            'model': self.w2v.state_dict(),
+            'optim': self.optim.state_dict(),
+            'vocab': self.vocab,
+        }, os.path.dirname(__file__) + '/../results/model/' + fname)
 
-    def load(self, path: str):
+    @staticmethod
+    def load(fname: str):
         """ load pytorch model """
-        self.w2v.load_state_dict(torch.load(path))
+        checkpoint = torch.load(os.path.dirname(__file__) + '/../results/model/' + fname)
+        return checkpoint
 
     def similarity(self, item1, item2):
         """ return two w2v output's similarity """
         idx1 = self.vocab[item1]
         idx2 = self.vocab[item2]
-        emb1 = self.w2v.pred(torch.tensor(idx1)).unsqueeze(0)
-        emb2 = self.w2v.pred(torch.tensor(idx2)).unsqueeze(0)
+        emb1 = self.w2v.predict(torch.tensor(idx1).to(self.device)).unsqueeze(0)
+        emb2 = self.w2v.predict(torch.tensor(idx2).to(self.device)).unsqueeze(0)
         cos = torch.cosine_similarity(emb1, emb2, dim=1)
         sim = cos
         return sim
@@ -60,8 +67,8 @@ class Word2Vec:
             self.vocab.to_idx2word()
 
         idx = self.vocab[item]
-        emb = self.w2v.pred(torch.tensor(idx)).unsqueeze(0)
-        sims = torch.mm(emb, self.w2v.embedding.weight.transpose(0, 1)).squeeze(0)
+        emb = self.w2v.predict(torch.tensor(idx).to(self.device)).unsqueeze(0)
+        sims = torch.mm(emb, self.w2v.i_embedding.weight.transpose(0, 1)).squeeze(0)
         sims = (-sims).sort()[1][0: top + 1]
         tops = []
         for k in range(top):
@@ -88,10 +95,28 @@ def accuracy(pred, target):
 
 
 class CbowModel(Word2Vec):
+    def __init__(self, dconf, mconf, mode):
+        super(CbowModel, self).__init__(dconf, mconf)
+        if mode == 'train':
+            self.dataset = TrainSet(self.dconf.data_path, self.vocab, self.dataset_form)
+            self.voc_size = len(self.vocab)
+            self.w2v = CBOW(self.voc_size, self.dconf.cont_size, self.mconf.emb_dim,
+                            self.mconf.hid_dim)
+        else:
+            checkpoint = self.load(dconf.saved_file)
+            if self.optim and mode is 'retrain':
+                self.optim.load_state_dict(checkpoint['optim'])
+            self.vocab = checkpoint['vocab']
+            self.vocab.to_idx2word()
+            self.voc_size = len(self.vocab)
+            self.w2v = CBOW(self.voc_size, self.dconf.cont_size, self.mconf.emb_dim,
+                            self.mconf.hid_dim)
+        self.w2v.to(self.device)
+
     def dataset_form(self, corpus, word2idx):
         rst = []
         for sent in corpus:
-            sent = [word2idx[x] for x in sent if x in word2idx]
+            sent = [word2idx[x] for x in sent if word2idx[x]]
             for i in range(1, len(sent) - 1):
                 wrd = sent[i]
                 trg_f = sent[i - 1]
@@ -101,16 +126,12 @@ class CbowModel(Word2Vec):
 
     def train(self):
         """ epoch만큼 학습 """
-
-        self.dataset = TrainSet(self.dconf.data_path, self.vocab, self.dataset_form)
-        self.voc_size = len(self.vocab)
+        assert self.dataset
         self._dataload = DataLoader(self.dataset,
                                     batch_size=self.mconf.batch_size,
                                     num_workers=0)
 
-        self.w2v = CBOW(self.voc_size, self.dconf.cont_size, self.mconf.emb_dim,
-                        self.mconf.hid_dim)
-        self.loss = nn.NLLLoss()
+        self.loss = nn.NLLLoss().to(self.device)
         self.optim = optim.Adam(params=self.w2v.parameters(), lr=self.mconf.lr)
         self.lrscheder = optim.lr_scheduler.ReduceLROnPlateau(self.optim, patience=5)
 
@@ -119,62 +140,67 @@ class CbowModel(Word2Vec):
             total_acc = 0
             self.w2v.train()
             for i, batch in enumerate(self._dataload):
-                word, target = batch
+                word, target = map(lambda x: x.to(self.device), batch)
                 self.optim.zero_grad()
                 pred = self.w2v(word)
                 b_loss = self.loss(pred, target)
                 b_loss.backward()
                 self.optim.step()
-
-                total_acc += accuracy(pred, target)
-                total_loss -= b_loss.item()
+                total_loss += b_loss.item()
             if epoch % 10 == 0:
                 self.save('trained.pth')
-            print(f'\tEpoch {epoch+1}\tTrain Loss: {total_loss / len(word):.3f}'
+            print(f'\tEpoch {epoch + 1}\tTrain Loss: {total_loss / len(word):.3f}'
                   f' | Acc: {total_acc / len(word):.3f}')
 
 
 class SkipGramModel(Word2Vec):
+    def __init__(self, dconf, mconf, mode):
+        super(SkipGramModel, self).__init__(dconf, mconf)
+        if mode == 'train':
+            self.dataset = TrainSet(self.dconf.data_path, self.vocab, self.dataset_form)
+            self.voc_size = len(self.vocab)
+            self.w2v = SkipGram(self.voc_size, self.mconf.emb_dim)
+        else:
+            checkpoint = self.load(dconf.saved_file)
+            if self.optim and mode is 'retrain':
+                self.optim.load_state_dict(checkpoint['optim'])
+            self.vocab = checkpoint['vocab']
+            self.vocab.to_idx2word()
+            self.voc_size = len(self.vocab)
+            self.w2v = SkipGram(self.voc_size, self.mconf.emb_dim)
+            self.w2v.load_state_dict(checkpoint['model'])
+        self.w2v.to(self.device)
 
     def dataset_form(self, corpus, word2idx):
         """ return input word, target words, negative samples """
         pos_samples = get_sub_sample(corpus, word2idx)
         neg_samples = get_neg_sample(word2idx, len(pos_samples))
-        rst = zip(*pos_samples, neg_samples)
+        rst = [(i[0][0], i[0][1], i[1]) for i in zip(pos_samples, neg_samples)]
         return rst
 
     def train(self):
         """ Skip gram """
-        self.dataset = TrainSet(self.dconf.data_path, self.vocab, self.dataset_form)
-        self.voc_size = len(self.vocab)
-
         self._dataload = DataLoader(self.dataset,
                                     batch_size=self.mconf.batch_size,
                                     num_workers=0)
 
-        self.w2v = SkipGram(self.voc_size, self.dconf.cont_size, self.mconf.emb_dim)
-        self.loss = nn.NLLLoss()
+        self.loss = nn.NLLLoss().to(self.device)
         self.optim = optim.Adam(params=self.w2v.parameters(), lr=self.mconf.lr)
         self.lrscheder = optim.lr_scheduler.ReduceLROnPlateau(self.optim, patience=5)
 
         for epoch in tqdm(range(self.mconf.epoch), desc='epoch'):
             total_loss = 0
-            total_acc = 0
-
             self.w2v.train()
-            for i, batch in tqdm(enumerate(self._dataload), desc="step", total=len(self._dataload)):
-                inp, out, neg = batch
+            for i, batch in enumerate(self._dataload):
+                inp, out, neg = map(lambda x: x.to(self.device), batch)
                 self.optim.zero_grad()
                 loss = self.w2v(inp, out, neg)
-
                 loss.backward()
                 self.optim.step()
-                total_acc += accuracy(self.w2v.pred, out)
-                total_loss -= loss.item()
+                total_loss += loss.item()
             if epoch % 10 == 0:
                 self.save('trained.pth')
-            print(f'\tEpoch {epoch+1}\tTrain Loss: {total_loss / len(inp):.3f}'
-                  f' | Acc: {total_acc / len(inp):.3f}')
+            print(f'\tEpoch {epoch + 1}\tTrain Loss: {total_loss / len(inp):.3f}')
 
 
 def get_sub_sample(corpus, word2idx):
@@ -190,11 +216,13 @@ def get_sub_sample(corpus, word2idx):
 
 
 def get_neg_sample(word2idx, total_size, t=10 ** -5, k=20):
-    vfreq = word2idx.freq.values()
-    noise_dstr = 1 - np.sqrt(t / (vfreq / sum(vfreq)))
+    vfreq = list(word2idx.freq.values())
+    tmp = [x**(3/4) for x in vfreq]
+    z_i = [x / sum(tmp) for x in tmp]
+    # noise_dstr = [1 - np.sqrt((z / t)) for z in z_i]
+    # noise_dstr = [(1 + np.sqrt(z / t)) * (t / z) for z in z_i]
     neg_samples = []
     for _ in range(total_size):
-        ne_samps = np.random.choice(vfreq.keys(), k, p=noise_dstr)
+        ne_samps = np.random.choice(list(word2idx.freq.keys()), k, p=z_i)
         neg_samples.append(ne_samps)
-
     return neg_samples

@@ -9,9 +9,8 @@ import torch.nn.functional as F
 
 
 class SkipGram(nn.Module):
-    def __init__(self, batch_size, voc_size, emb_dim):
+    def __init__(self, voc_size, emb_dim):
         super().__init__()
-        self.batch_size = batch_size
         self.i_embedding = nn.Embedding(voc_size, emb_dim)
         self.o_embedding = nn.Embedding(voc_size, emb_dim)
         self.pred = torch.tensor([])
@@ -20,7 +19,7 @@ class SkipGram(nn.Module):
         inp_emb = self.i_embedding(i)
         out_emb = self.o_embedding(o)
 
-        self.pred = inp_emb
+        self.pred = out_emb
         pos_val = F.logsigmoid(torch.bmm(out_emb, inp_emb.unsqueeze(2)).squeeze(2).sum(1))
         neg_emb = self.o_embedding(neg)
         neg_val = - F.logsigmoid(torch.bmm(neg_emb, inp_emb.unsqueeze(2)).squeeze(2).sum(1))

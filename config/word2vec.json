@@ -1,8 +1,8 @@
 {
-  "model": "cbow",
+  "model": "",
   "emb_dim": 256,
   "hid_dim": 256,
   "epoch": 50,
-  "batch_size": 500,
+  "batch_size": 1000,
   "lr": 0.001
 }
