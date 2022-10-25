@@ -1,6 +1,0 @@
-{
-  "min_cnt": 5,
-  "data_path": "data/en.csv",
-  "cont_size": 1,
-  "saved_file": "trained.pth"
-}
